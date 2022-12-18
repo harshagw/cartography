@@ -78,11 +78,15 @@ class Sync:
         :param config: Configuration for the sync run.
         """
         logger.info("Starting sync with update tag '%d'", config.update_tag)
+
         with neo4j_driver.session(database=config.neo4j_database) as neo4j_session:
             for stage_name, stage_func in self._stages.items():
                 logger.info("Starting sync stage '%s'", stage_name)
                 try:
-                    stage_func(neo4j_session, config)
+                    if stage_name == "aws":
+                        stage_func(neo4j_session, neo4j_driver, config)
+                    else:
+                        stage_func(neo4j_session, config)
                 except (KeyboardInterrupt, SystemExit):
                     logger.warning("Sync interrupted during stage '%s'.", stage_name)
                     raise

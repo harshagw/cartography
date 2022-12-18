@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from typing import Dict
 from typing import List
-
+import threading
 import boto3
 import neo4j
 
@@ -419,12 +419,42 @@ def cleanup_ec2_instances(neo4j_session: neo4j.Session, common_job_parameters: D
 
 
 @timeit
+def sync_ec2_instance_per_region(neo4j_session: neo4j.Session,
+                                 neo4j_driver: neo4j.Driver,
+                                 neo4j_database: str,
+                                 boto3_session: boto3.session.Session,
+                                 region: str,
+                                 current_aws_account_id: str,
+                                 update_tag: int, ) -> None:
+    with neo4j_driver.session(database=neo4j_database) as neo4j_thread_session:
+        logger.info("Syncing EC2 instances for region '%s' in account '%s'.", region, current_aws_account_id)
+        data = get_ec2_instances(boto3_session, region)
+        load_ec2_instances(neo4j_thread_session, data, region, current_aws_account_id, update_tag)
+
+
+@timeit
 def sync_ec2_instances(
-        neo4j_session: neo4j.Session, boto3_session: boto3.session.Session, regions: List[str],
+        neo4j_session: neo4j.Session,  neo4j_driver: neo4j.Driver,
+        neo4j_database: str, boto3_session: boto3.session.Session, regions: List[str],
         current_aws_account_id: str, update_tag: int, common_job_parameters: Dict,
 ) -> None:
     for region in regions:
         logger.info("Syncing EC2 instances for region '%s' in account '%s'.", region, current_aws_account_id)
         data = get_ec2_instances(boto3_session, region)
         load_ec2_instances(neo4j_session, data, region, current_aws_account_id, update_tag)
+
+    # ts = []
+    #
+    # for region in regions:
+    #     t = threading.Thread(target=sync_ec2_instance_per_region,
+    #                          args=(
+    #                              neo4j_session, neo4j_driver, neo4j_database, boto3_session, region,
+    #                              current_aws_account_id,
+    #                              update_tag,))
+    #     t.start()
+    #     ts.append(t)
+    #
+    # for t in ts:
+    #     t.join()
+
     cleanup_ec2_instances(neo4j_session, common_job_parameters)

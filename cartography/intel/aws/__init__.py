@@ -26,11 +26,16 @@ logger = logging.getLogger(__name__)
 
 
 def _build_aws_sync_kwargs(
-    neo4j_session: neo4j.Session, boto3_session: boto3.session.Session, regions: List[str], current_aws_account_id: str,
-    sync_tag: int, common_job_parameters: Dict[str, Any],
+        neo4j_session: neo4j.Session, neo4j_driver: neo4j.Driver, neo4j_database: str,
+        boto3_session: boto3.session.Session,
+        regions: List[str],
+        current_aws_account_id: str,
+        sync_tag: int, common_job_parameters: Dict[str, Any],
 ) -> Dict[str, Any]:
     return {
         'neo4j_session': neo4j_session,
+        'neo4j_driver': neo4j_driver,
+        'neo4j_database':neo4j_database,
         'boto3_session': boto3_session,
         'regions': regions,
         'current_aws_account_id': current_aws_account_id,
@@ -40,19 +45,22 @@ def _build_aws_sync_kwargs(
 
 
 def _sync_one_account(
-    neo4j_session: neo4j.Session,
-    boto3_session: boto3.session.Session,
-    current_aws_account_id: str,
-    update_tag: int,
-    common_job_parameters: Dict[str, Any],
-    regions: List[str] = [],
-    aws_requested_syncs: Iterable[str] = RESOURCE_FUNCTIONS.keys(),
+        neo4j_session: neo4j.Session,
+        neo4j_driver: neo4j.Driver,
+        neo4j_database: str,
+        boto3_session: boto3.session.Session,
+        current_aws_account_id: str,
+        update_tag: int,
+        common_job_parameters: Dict[str, Any],
+        regions: List[str] = [],
+        aws_requested_syncs: Iterable[str] = RESOURCE_FUNCTIONS.keys(),
 ) -> None:
     if not regions:
         regions = _autodiscover_account_regions(boto3_session, current_aws_account_id)
 
     sync_args = _build_aws_sync_kwargs(
-        neo4j_session, boto3_session, regions, current_aws_account_id, update_tag, common_job_parameters,
+        neo4j_session, neo4j_driver, neo4j_database, boto3_session, regions, current_aws_account_id, update_tag,
+        common_job_parameters,
     )
 
     for func_name in aws_requested_syncs:
@@ -113,8 +121,8 @@ def _autodiscover_account_regions(boto3_session: boto3.session.Session, account_
 
 
 def _autodiscover_accounts(
-    neo4j_session: neo4j.Session, boto3_session: boto3.session.Session, account_id: str,
-    sync_tag: int, common_job_parameters: Dict,
+        neo4j_session: neo4j.Session, boto3_session: boto3.session.Session, account_id: str,
+        sync_tag: int, common_job_parameters: Dict,
 ) -> None:
     logger.info("Trying to autodiscover accounts.")
     try:
@@ -137,12 +145,14 @@ def _autodiscover_accounts(
 
 
 def _sync_multiple_accounts(
-    neo4j_session: neo4j.Session,
-    accounts: Dict[str, str],
-    sync_tag: int,
-    common_job_parameters: Dict[str, Any],
-    aws_best_effort_mode: bool,
-    aws_requested_syncs: List[str] = [],
+        neo4j_session: neo4j.Session,
+        neo4j_driver: neo4j.Driver,
+        neo4j_database: str,
+        accounts: Dict[str, str],
+        sync_tag: int,
+        common_job_parameters: Dict[str, Any],
+        aws_best_effort_mode: bool,
+        aws_requested_syncs: List[str] = [],
 ) -> bool:
     logger.info("Syncing AWS accounts: %s", ', '.join(accounts.values()))
     organizations.sync(neo4j_session, accounts, sync_tag, common_job_parameters)
@@ -166,6 +176,8 @@ def _sync_multiple_accounts(
         try:
             _sync_one_account(
                 neo4j_session,
+                neo4j_driver,
+                neo4j_database,
                 boto3_session,
                 account_id,
                 sync_tag,
@@ -198,7 +210,7 @@ def _sync_multiple_accounts(
 
 
 @timeit
-def start_aws_ingestion(neo4j_session: neo4j.Session, config: Config) -> None:
+def start_aws_ingestion(neo4j_session: neo4j.Session, neo4j_driver: neo4j.Driver, config: Config) -> None:
     common_job_parameters = {
         "UPDATE_TAG": config.update_tag,
         "permission_relationships_file": config.permission_relationships_file,
@@ -242,6 +254,8 @@ def start_aws_ingestion(neo4j_session: neo4j.Session, config: Config) -> None:
 
     sync_successful = _sync_multiple_accounts(
         neo4j_session,
+        neo4j_driver,
+        config.neo4j_database,
         aws_accounts,
         config.update_tag,
         common_job_parameters,

@@ -1,7 +1,7 @@
 import logging
 from typing import Dict
 from typing import List
-
+import threading
 import boto3
 import neo4j
 
@@ -22,8 +22,8 @@ def get_internet_gateways(boto3_session: boto3.session.Session, region: str) -> 
 
 @timeit
 def load_internet_gateways(
-    neo4j_session: neo4j.Session, internet_gateways: List[Dict], region: str,
-    current_aws_account_id: str, update_tag: int,
+        neo4j_session: neo4j.Session, internet_gateways: List[Dict], region: str,
+        current_aws_account_id: str, update_tag: int,
 ) -> None:
     logger.info("Loading %d Internet Gateways in %s.", len(internet_gateways), region)
     # TODO: Right now this won't work in non-AWS commercial (GovCloud, China) as partition is hardcoded
@@ -68,13 +68,43 @@ def cleanup(neo4j_session: neo4j.Session, common_job_parameters: Dict) -> None:
 
 
 @timeit
+def sync_internet_gateways_per_region(neo4j_session: neo4j.Session,
+                                      neo4j_driver: neo4j.Driver,
+                                      neo4j_database: str,
+                                      boto3_session: boto3.session.Session,
+                                      region: str,
+                                      current_aws_account_id: str,
+                                      update_tag: int, ) -> None:
+    with neo4j_driver.session(database=neo4j_database) as neo4j_thread_session:
+        logger.info("Syncing Internet Gateways for region '%s' in account '%s'.", region, current_aws_account_id)
+        internet_gateways = get_internet_gateways(boto3_session, region)
+        load_internet_gateways(neo4j_thread_session, internet_gateways, region, current_aws_account_id, update_tag)
+
+
+@timeit
 def sync_internet_gateways(
-    neo4j_session: neo4j.Session, boto3_session: boto3.session.Session, regions: List[str], current_aws_account_id: str,
-    update_tag: int, common_job_parameters: Dict,
+        neo4j_session: neo4j.Session, neo4j_driver: neo4j.Driver,
+        neo4j_database: str, boto3_session: boto3.session.Session, regions: List[str],
+        current_aws_account_id: str,
+        update_tag: int, common_job_parameters: Dict,
 ) -> None:
     for region in regions:
         logger.info("Syncing Internet Gateways for region '%s' in account '%s'.", region, current_aws_account_id)
         internet_gateways = get_internet_gateways(boto3_session, region)
         load_internet_gateways(neo4j_session, internet_gateways, region, current_aws_account_id, update_tag)
+
+    # ts = []
+    #
+    # for region in regions:
+    #     t = threading.Thread(target=sync_internet_gateways_per_region,
+    #                          args=(
+    #                              neo4j_session, neo4j_driver, neo4j_database, boto3_session, region,
+    #                              current_aws_account_id,
+    #                              update_tag,))
+    #     t.start()
+    #     ts.append(t)
+    #
+    # for t in ts:
+    #     t.join()
 
     cleanup(neo4j_session, common_job_parameters)
